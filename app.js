@@ -1,5 +1,20 @@
 // app.js - Rayo Social Network
-// Main application with localStorage persistence
+// Main application with localStorage persistence + Firestore for multi-user
+
+// Check if we're in Firebase mode
+const isFirebaseMode = localStorage.getItem('rayo_firebase_user') === 'true';
+let firestoreService = null;
+let unsubscribePosts = null;
+
+// Load Firestore service if in Firebase mode
+if (isFirebaseMode) {
+    import('./firestore-service.js').then(module => {
+        firestoreService = module;
+        console.log('🔥 Firestore mode enabled');
+    }).catch(err => {
+        console.warn('Firestore not available, using localStorage:', err.message);
+    });
+}
 
 document.addEventListener('DOMContentLoaded', () => {
     // ==================== CHECK AUTH ====================
@@ -24,7 +39,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     updateUserUI(currentUser);
-    loadPosts();
+
+    // Use Firestore or localStorage depending on mode
+    if (isFirebaseMode && firestoreService) {
+        // Subscribe to real-time posts from Firestore
+        unsubscribePosts = firestoreService.subscribeToPostsFirestore((posts) => {
+            renderPosts(posts);
+        });
+    } else {
+        loadPosts();
+    }
+
     updateNotificationBadge();
     lucide.createIcons();
 
@@ -251,32 +276,40 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ==================== RENDER POSTS ====================
-    function loadPosts(filterUserId = null, filterFollowing = false) {
-        let posts = getPosts();
+    // Core render function used by both localStorage and Firestore modes
+    function renderPosts(posts, filterUserId = null, filterFollowing = false) {
         const container = document.getElementById('posts-container');
         container.innerHTML = '';
 
+        let filteredPosts = [...posts];
+
         if (filterUserId) {
-            posts = posts.filter(p => p.authorId === filterUserId);
+            filteredPosts = filteredPosts.filter(p => p.authorId === filterUserId);
         }
 
         if (filterFollowing) {
             const user = JSON.parse(localStorage.getItem('rayo_demo_user'));
             const following = user.following || [];
-            posts = posts.filter(p => following.includes(p.authorId) || p.authorId === currentUser.uid);
+            filteredPosts = filteredPosts.filter(p => following.includes(p.authorId) || p.authorId === currentUser.uid);
         }
 
-        posts.sort((a, b) => b.createdAt - a.createdAt);
+        filteredPosts.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
-        if (posts.length === 0) {
+        if (filteredPosts.length === 0) {
             container.innerHTML = '<div class="empty-state"><p>No hay publicaciones aún</p></div>';
         } else {
-            posts.forEach(post => {
+            filteredPosts.forEach(post => {
                 container.appendChild(createPostElement(post));
             });
         }
 
         lucide.createIcons();
+    }
+
+    // Load posts from localStorage (demo mode)
+    function loadPosts(filterUserId = null, filterFollowing = false) {
+        const posts = getPosts();
+        renderPosts(posts, filterUserId, filterFollowing);
     }
 
     function createPostElement(post) {
