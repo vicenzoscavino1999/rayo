@@ -24,6 +24,15 @@ import {
 // Check if we're in Firebase mode
 const isFirebaseMode = localStorage.getItem('rayo_firebase_user') === 'true';
 
+// ==================== SECURITY: HTML SANITIZATION ====================
+// Prevent XSS attacks by escaping HTML characters
+function sanitizeHTML(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     // ==================== CHECK AUTH ====================
     const demoMode = localStorage.getItem('rayo_demo_mode');
@@ -586,8 +595,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const div = document.createElement('div');
         div.className = `message ${isSent ? 'sent' : 'received'}`;
+
+        // Sanitize message content to prevent XSS
+        const safeContent = sanitizeHTML(message.content);
+
         div.innerHTML = `
-            <div class="message-content">${message.content}</div>
+            <div class="message-content">${safeContent}</div>
             <div class="message-time">${formatTime(message.timestamp)}</div>
         `;
 

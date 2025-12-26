@@ -481,6 +481,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         const likeCount = post.likes.length;
         const commentCount = Array.isArray(post.comments) ? post.comments.length : post.comments;
 
+        // Sanitize user-generated content to prevent XSS
+        const safeName = sanitizeHTML(post.authorName);
+        const safeUsername = sanitizeHTML(post.authorUsername);
+
         let verifiedIcon = '';
         if (post.verified) {
             const colorClass = post.verifiedColor === 'blue' ? 'blue' : '';
@@ -489,11 +493,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         let mediaHtml = '';
         if (post.imageUrl) {
-            mediaHtml = `
-                <div class="post-media">
-                    <img src="${post.imageUrl}" alt="Post image">
-                </div>
-            `;
+            // Sanitize image URL to prevent javascript: protocol attacks
+            const safeImageUrl = post.imageUrl.startsWith('data:image/') ||
+                post.imageUrl.startsWith('https://') ||
+                post.imageUrl.startsWith('http://')
+                ? post.imageUrl : '';
+            if (safeImageUrl) {
+                mediaHtml = `
+                    <div class="post-media">
+                        <img src="${safeImageUrl}" alt="Post image">
+                    </div>
+                `;
+            }
         }
 
         const isOwnPost = post.authorId === currentUser.uid;
@@ -503,11 +514,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         article.innerHTML = `
             <div class="post-layout">
-                <img src="${post.authorPhoto}" alt="${post.authorName}" class="avatar-small post-avatar" data-user-id="${post.authorId}">
+                <img src="${sanitizeHTML(post.authorPhoto)}" alt="${safeName}" class="avatar-small post-avatar" data-user-id="${post.authorId}">
                 <div class="post-body">
                     <header class="post-header">
-                        <span class="post-user-name clickable-user" data-user-id="${post.authorId}">${post.authorName} ${verifiedIcon}</span>
-                        <span class="post-user-handle">@${post.authorUsername}</span>
+                        <span class="post-user-name clickable-user" data-user-id="${post.authorId}">${safeName} ${verifiedIcon}</span>
+                        <span class="post-user-handle">@${safeUsername}</span>
                         <span class="post-time">· ${timeAgo}</span>
                         ${optionsHtml}
                     </header>
@@ -531,11 +542,30 @@ document.addEventListener('DOMContentLoaded', async () => {
         return article;
     }
 
+    // ==================== SECURITY: HTML SANITIZATION ====================
+    // Prevent XSS attacks by escaping HTML characters
+    function sanitizeHTML(str) {
+        if (!str) return '';
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
     function formatContent(content) {
-        let formatted = content.replace(/\n/g, '<br>');
+        // First, sanitize to prevent XSS attacks
+        let sanitized = sanitizeHTML(content);
+
+        // Then apply formatting (safe because we sanitized first)
+        let formatted = sanitized.replace(/\n/g, '<br>');
         formatted = formatted.replace(/#(\w+)/g, '<span class="hashtag">#$1</span>');
         formatted = formatted.replace(/@(\w+)/g, '<span class="mention">@$1</span>');
         return formatted;
+    }
+
+    // Safe text for attributes (user names, etc)
+    function safeText(str) {
+        if (!str) return '';
+        return sanitizeHTML(str);
     }
 
     function getTimeAgo(timestamp) {
@@ -587,15 +617,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     function createCommentElement(comment) {
         const div = document.createElement('div');
         div.className = 'comment';
+
+        // Sanitize user-generated content to prevent XSS
+        const safeName = sanitizeHTML(comment.authorName);
+        const safeUsername = sanitizeHTML(comment.authorUsername);
+        const safeContent = sanitizeHTML(comment.content);
+        const safePhoto = sanitizeHTML(comment.authorPhoto);
+
         div.innerHTML = `
-            <img src="${comment.authorPhoto}" alt="${comment.authorName}" class="avatar-tiny">
+            <img src="${safePhoto}" alt="${safeName}" class="avatar-tiny">
             <div class="comment-body">
                 <div class="comment-header">
-                    <span class="comment-author">${comment.authorName}</span>
-                    <span class="comment-handle">@${comment.authorUsername}</span>
+                    <span class="comment-author">${safeName}</span>
+                    <span class="comment-handle">@${safeUsername}</span>
                     <span class="comment-time">· ${getTimeAgo(comment.createdAt)}</span>
                 </div>
-                <div class="comment-content">${comment.content}</div>
+                <div class="comment-content">${safeContent}</div>
             </div>
         `;
         return div;
