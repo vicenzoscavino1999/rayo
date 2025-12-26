@@ -436,9 +436,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             lucide.createIcons();
         }
 
-        // Load posts from localStorage (demo mode)
+        // Render posts based on current data
         function loadPosts(filterUserId = null, filterFollowing = false) {
-            const posts = getPosts();
+            const posts = isFirebaseMode ? currentFirestorePosts : getPosts();
             renderPosts(posts, filterUserId, filterFollowing);
         }
 
@@ -633,126 +633,193 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         // ==================== PROFILE ====================
-        function showProfile(userId) {
-            const posts = getPosts();
-            const userPosts = posts.filter(p => p.authorId === userId);
-            const users = getUsers();
-
-            let userInfo;
-            if (userId === currentUser.uid) {
-                userInfo = { ...currentUser };
-                const storedUser = JSON.parse(localStorage.getItem('rayo_demo_user'));
-                userInfo.following = storedUser.following || [];
-                userInfo.followers = storedUser.followers || [];
-            } else {
-                userInfo = users.find(u => u.uid === userId);
-                if (!userInfo) {
-                    const userPost = userPosts[0];
-                    if (userPost) {
-                        userInfo = {
-                            uid: userId,
-                            displayName: userPost.authorName,
-                            username: userPost.authorUsername,
-                            photoURL: userPost.authorPhoto,
-                            verified: userPost.verified,
-                            verifiedColor: userPost.verifiedColor,
-                            bio: '⚡ Usuario de Rayo',
-                            followers: [],
-                            following: []
-                        };
-                    } else {
-                        return;
-                    }
-                }
-            }
-
-            const container = document.getElementById('posts-container');
-            const header = document.querySelector('.feed-header');
-
-            header.innerHTML = `
-            <div class="profile-header-back">
-                <button class="btn-back" id="btn-back"><i data-lucide="arrow-left"></i></button>
-                <div class="profile-header-info">
-                    <span class="profile-header-name">${userInfo.displayName}</span>
-                    <span class="profile-header-posts">${userPosts.length} posts</span>
-                </div>
-            </div>
-        `;
-
-            let verifiedIcon = '';
-            if (userInfo.verified) {
-                const colorClass = userInfo.verifiedColor === 'blue' ? 'blue' : '';
-                verifiedIcon = `<i data-lucide="check-circle" class="verified-icon ${colorClass}"></i>`;
-            }
-
-            const isOwnProfile = userId === currentUser.uid;
-            const isFollowingUser = isFollowing(userId);
-            const actionBtn = isOwnProfile ?
-                '<button class="btn-edit-profile">Editar perfil</button>' :
-                `<button class="btn-follow-profile ${isFollowingUser ? 'following' : ''}" data-user-id="${userId}">${isFollowingUser ? 'Siguiendo' : 'Seguir'}</button>`;
-
-            const followersCount = (userInfo.followers || []).length;
-            const followingCount = (userInfo.following || []).length;
-
-            container.innerHTML = `
-            <div class="profile-card">
-                <div class="profile-banner"></div>
-                <div class="profile-info">
-                    <img src="${userInfo.photoURL}" alt="${userInfo.displayName}" class="profile-avatar">
-                    <div class="profile-actions">
-                        ${actionBtn}
-                    </div>
-                    <h2 class="profile-name">${userInfo.displayName} ${verifiedIcon}</h2>
-                    <p class="profile-handle">@${userInfo.username}</p>
-                    <p class="profile-bio">${userInfo.bio || '⚡ Usuario de Rayo'}</p>
-                    <div class="profile-stats">
-                        <span><strong>${followingCount}</strong> Siguiendo</span>
-                        <span><strong>${followersCount}</strong> Seguidores</span>
-                    </div>
-                </div>
-            </div>
-            <div class="profile-tabs">
-                <div class="profile-tab active">Posts</div>
-                <div class="profile-tab">Respuestas</div>
-                <div class="profile-tab">Me gusta</div>
-            </div>
-            <div id="profile-posts-container"></div>
-        `;
-
-            const profilePostsContainer = document.getElementById('profile-posts-container');
-            userPosts.sort((a, b) => b.createdAt - a.createdAt);
-
-            if (userPosts.length === 0) {
-                profilePostsContainer.innerHTML = '<div class="empty-state"><p>Este usuario no tiene publicaciones</p></div>';
-            } else {
-                userPosts.forEach(post => {
-                    profilePostsContainer.appendChild(createPostElement(post));
-                });
-            }
-
+        async function showProfile(userId) {
             currentView = 'profile';
+            const container = document.getElementById('posts-container');
+
+            // Show loading state
+            container.innerHTML = '<div class="loading-spinner"><i data-lucide="loader-2" class="animate-spin"></i></div>';
             lucide.createIcons();
 
-            document.getElementById('btn-back').addEventListener('click', () => {
-                showFeed();
-            });
+            try {
+                // 1. Fetch User Data
+                const userRef = doc(db, "users", userId);
+                const userSnap = await getDoc(userRef);
 
-            // Follow button handler
-            const followBtn = container.querySelector('.btn-follow-profile');
-            if (followBtn) {
-                followBtn.addEventListener('click', () => {
-                    const targetId = followBtn.dataset.userId;
-                    const nowFollowing = toggleFollow(targetId);
-                    followBtn.textContent = nowFollowing ? 'Siguiendo' : 'Seguir';
-                    followBtn.classList.toggle('following', nowFollowing);
-
-                    // Update follower count
-                    const statsSpans = container.querySelectorAll('.profile-stats span');
-                    if (statsSpans[1]) {
-                        const currentCount = parseInt(statsSpans[1].querySelector('strong').textContent);
-                        statsSpans[1].innerHTML = `<strong>${nowFollowing ? currentCount + 1 : currentCount - 1}</strong> Seguidores`;
+                let userInfo;
+                if (!userSnap.exists()) {
+                    // Try to see if it's the current user but doc is missing (shouldn't happen but fallback)
+                    if (userId === currentUser.uid) {
+                        userInfo = { ...currentUser }; // Fallback to auth object
+                    } else {
+                        container.innerHTML = '<div class="error-message">Usuario no encontrado</div>';
+                        return;
                     }
+                } else {
+                    userInfo = userSnap.data();
+                    userInfo.uid = userId;
+                }
+
+                // Ensure defaults
+                userInfo = {
+                    uid: userId,
+                    displayName: userInfo.displayName || 'Usuario',
+                    username: userInfo.username || 'usuario',
+                    photoURL: userInfo.photoURL || 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + userId,
+                    verified: userInfo.verified || false,
+                    verifiedColor: userInfo.verifiedColor || 'blue',
+                    bio: userInfo.bio || '⚡ Usuario de Rayo',
+                    followers: userInfo.followers || [],
+                    following: userInfo.following || []
+                };
+
+                // 2. Fetch User Posts
+                const postsRef = collection(db, "posts");
+                const q = query(postsRef, where("authorId", "==", userId), orderBy("createdAt", "desc"));
+                const querySnapshot = await getDocs(q);
+                const userPosts = [];
+                querySnapshot.forEach((doc) => {
+                    userPosts.push({ id: doc.id, ...doc.data() });
                 });
+
+                // 3. Render Profile Header
+                const header = document.querySelector('.feed-header');
+                header.innerHTML = `
+                    <div class="profile-header-back">
+                        <button class="btn-back" id="btn-back"><i data-lucide="arrow-left"></i></button>
+                        <div class="profile-header-info">
+                            <span class="profile-header-name">${userInfo.displayName}</span>
+                            <span class="profile-header-posts">${userPosts.length} posts</span>
+                        </div>
+                    </div>
+                `;
+
+                // Verified Icon
+                let verifiedIcon = '';
+                if (userInfo.verified) {
+                    const colorClass = userInfo.verifiedColor === 'blue' ? 'blue' : '';
+                    verifiedIcon = `<i data-lucide="check-circle" class="verified-icon ${colorClass}"></i>`;
+                }
+
+                // Check Follow Status using current User state or derived from following array
+                let isFollowingUser = false;
+                if (currentUser && currentUser.uid !== userId) {
+                    // We check if the target user's ID is in our following list
+                    // OR we can check if our ID is in their followers list (if we fetched that). 
+                    // But typically 'am I following them' is in 'my' doc.
+
+                    // Assuming currentUser global object is kept updated or we should fetch it.
+                    // For now, let's assume currentUser has 'following' array.
+                    if (currentUser.following && Array.isArray(currentUser.following)) {
+                        isFollowingUser = currentUser.following.includes(userId);
+                    }
+                }
+
+                const isOwnProfile = currentUser && userId === currentUser.uid;
+
+                const actionBtn = isOwnProfile ?
+                    '<button class="btn-edit-profile">Editar perfil</button>' :
+                    `<button class="btn-follow-profile ${isFollowingUser ? 'following' : ''}" data-user-id="${userId}">${isFollowingUser ? 'Siguiendo' : 'Seguir'}</button>`;
+
+                const followersCount = userInfo.followers.length;
+                const followingCount = userInfo.following.length;
+
+                container.innerHTML = `
+                    <div class="profile-card">
+                        <div class="profile-banner"></div>
+                        <div class="profile-info">
+                            <img src="${userInfo.photoURL}" alt="${userInfo.displayName}" class="profile-avatar">
+                            <div class="profile-actions">
+                                ${actionBtn}
+                            </div>
+                            <h2 class="profile-name">${userInfo.displayName} ${verifiedIcon}</h2>
+                            <p class="profile-handle">@${userInfo.username}</p>
+                            <p class="profile-bio">${userInfo.bio}</p>
+                            <div class="profile-stats">
+                                <span><strong>${followingCount}</strong> Siguiendo</span>
+                                <span><strong>${followersCount}</strong> Seguidores</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="profile-tabs">
+                        <div class="profile-tab active">Posts</div>
+                        <div class="profile-tab">Respuestas</div>
+                        <div class="profile-tab">Me gusta</div>
+                    </div>
+                    <div id="profile-posts-container"></div>
+                `;
+
+                const profilePostsContainer = document.getElementById('profile-posts-container');
+
+                if (userPosts.length === 0) {
+                    profilePostsContainer.innerHTML = '<div class="empty-state"><p>Este usuario no tiene publicaciones</p></div>';
+                } else {
+                    userPosts.forEach(post => {
+                        profilePostsContainer.appendChild(createPostElement(post));
+                    });
+                }
+
+                lucide.createIcons();
+
+                // Event Listeners
+                document.getElementById('btn-back').addEventListener('click', () => {
+                    showFeed();
+                });
+
+                // Follow Button Logic
+                const followBtn = container.querySelector('.btn-follow-profile');
+                if (followBtn) {
+                    followBtn.addEventListener('click', async () => {
+                        if (!currentUser) return;
+
+                        const isNowFollowing = !followBtn.classList.contains('following');
+                        // Optimistic UI
+                        followBtn.textContent = isNowFollowing ? 'Siguiendo' : 'Seguir';
+                        followBtn.classList.toggle('following', isNowFollowing);
+
+                        // Update stats visually
+                        const statsSpans = container.querySelectorAll('.profile-stats span');
+                        if (statsSpans[1]) {
+                            // Assuming 2nd span is Followers
+                            let currentCount = parseInt(statsSpans[1].querySelector('strong').textContent);
+                            statsSpans[1].innerHTML = `<strong>${isNowFollowing ? currentCount + 1 : currentCount - 1}</strong> Seguidores`;
+                        }
+
+                        // Update Firestore
+                        try {
+                            const myRef = doc(db, "users", currentUser.uid);
+                            const targetRef = doc(db, "users", userId);
+
+                            if (isNowFollowing) {
+                                await updateDoc(myRef, { following: arrayUnion(userId) });
+                                await updateDoc(targetRef, { followers: arrayUnion(currentUser.uid) });
+                                if (currentUser.following) currentUser.following.push(userId);
+                            } else {
+                                await updateDoc(myRef, { following: arrayRemove(userId) });
+                                await updateDoc(targetRef, { followers: arrayRemove(currentUser.uid) });
+                                if (currentUser.following) {
+                                    currentUser.following = currentUser.following.filter(id => id !== userId);
+                                }
+                            }
+                        } catch (err) {
+                            console.error("Error updating follow status:", err);
+                        }
+                    });
+                }
+
+                // Edit Profile Button (Placeholder)
+                const editBtn = container.querySelector('.btn-edit-profile');
+                if (editBtn) {
+                    editBtn.addEventListener('click', () => {
+                        alert("Editar perfil próximamente");
+                    });
+                }
+
+            } catch (error) {
+                console.error("Error in showProfile:", error);
+
+                // Fallback for demo/dev if needed, but we want to stick to Firestore
+                container.innerHTML = `<div class="error-message">Error al cargar perfil: ${error.message}</div>`;
             }
         }
 
@@ -1129,8 +1196,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         }, 2000);
     }
     // Navigation Views
+    // Navigation Views
     function showNotifications() {
-        // Create simple modal for notifications
         const modalHtml = `
             <div class="modal-overlay active" id="notifications-modal">
                 <div class="modal-container">
@@ -1152,15 +1219,107 @@ document.addEventListener('DOMContentLoaded', async () => {
         lucide.createIcons();
     }
 
-    function showExplore() {
-        // Focus search bar and show toast
-        const searchInput = document.querySelector('.search-bar input');
-        if (searchInput) {
-            searchInput.focus();
-            searchInput.parentElement.classList.add('highlight-pulse');
-            setTimeout(() => searchInput.parentElement.classList.remove('highlight-pulse'), 2000);
+    async function showExplore() {
+        showToast("Explorar: Cargando usuarios...");
+
+        // Modal for search results
+        const modalHtml = `
+            <div class="modal-overlay active" id="explore-modal">
+                <div class="modal-container">
+                    <div class="modal-header">
+                        <h2>Explorar Usuarios</h2>
+                        <button class="btn-icon" onclick="document.getElementById('explore-modal').remove()"><i data-lucide="x"></i></button>
+                    </div>
+                    <div class="modal-body">
+                         <div class="search-bar" style="margin-bottom: 20px;">
+                            <i data-lucide="search"></i>
+                            <input type="text" placeholder="Buscar personas..." id="explore-search-input" style="width: 100%;">
+                        </div>
+                        <div id="explore-results">
+                            <div class="loader-spinner"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        lucide.createIcons();
+
+        // Initial load of latest users
+        const resultsContainer = document.getElementById('explore-results');
+
+        try {
+            // Simple query to get latest users (limit 10)
+            // Note: In a real app index might be needed, here we just list some
+            let q = query(collection(db, "users"), limit(10));
+            const snapshot = await getDocs(q);
+
+            if (snapshot.empty) {
+                resultsContainer.innerHTML = '<p style="text-align:center; color: var(--text-secondary)">No hay usuarios encontrados.</p>';
+            } else {
+                resultsContainer.innerHTML = '';
+                snapshot.forEach(doc => {
+                    const userData = doc.data();
+                    const userEl = document.createElement('div');
+                    userEl.className = 'user-result-item';
+                    userEl.style.cssText = 'display: flex; align-items: center; padding: 10px; border-bottom: 1px solid var(--border-color); cursor: pointer;';
+                    userEl.innerHTML = `
+                        <img src="${userData.photoURL || 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + userData.uid}" alt="${userData.displayName}" class="avatar-small">
+                        <div style="margin-left: 10px;">
+                            <div style="font-weight: bold;">${userData.displayName || 'Usuario'}</div>
+                            <div style="color: var(--text-secondary);">@${userData.username || 'usuario'}</div>
+                        </div>
+                    `;
+                    userEl.addEventListener('click', () => {
+                        document.getElementById('explore-modal').remove();
+                        showProfile(doc.id);
+                    });
+                    resultsContainer.appendChild(userEl);
+                });
+            }
+
+            // Search functionality
+            const input = document.getElementById('explore-search-input');
+            input.addEventListener('input', async (e) => {
+                const term = e.target.value.toLowerCase();
+                // Client-side filtering for simplicity in this demo (firestore search is complex)
+                // In production, use Algolia/Typesense. Here we filter the loaded snapshot or fetch all.
+                // Re-rendering filtered results from initial snapshot for better responsiveness
+                resultsContainer.innerHTML = '';
+                let foundAny = false;
+
+                snapshot.forEach(doc => {
+                    const userData = doc.data();
+                    if (userData.displayName?.toLowerCase().includes(term) || userData.username?.toLowerCase().includes(term)) {
+                        foundAny = true;
+                        const userEl = document.createElement('div');
+                        userEl.className = 'user-result-item';
+                        userEl.style.cssText = 'display: flex; align-items: center; padding: 10px; border-bottom: 1px solid var(--border-color); cursor: pointer;';
+                        userEl.innerHTML = `
+                            <img src="${userData.photoURL || 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + userData.uid}" alt="${userData.displayName}" class="avatar-small">
+                            <div style="margin-left: 10px;">
+                                <div style="font-weight: bold;">${userData.displayName || 'Usuario'}</div>
+                                <div style="color: var(--text-secondary);">@${userData.username || 'usuario'}</div>
+                            </div>
+                        `;
+                        userEl.addEventListener('click', () => {
+                            document.getElementById('explore-modal').remove();
+                            showProfile(doc.id);
+                        });
+                        resultsContainer.appendChild(userEl);
+                    }
+                });
+
+                if (!foundAny) {
+                    resultsContainer.innerHTML = '<p style="text-align:center; color: var(--text-secondary)">No hay coincidencias.</p>';
+                }
+
+            });
+
+        } catch (error) {
+            console.error("Error loading users:", error);
+            resultsContainer.innerHTML = '<p style="color: red; text-align:center;">Error al cargar usuarios.</p>';
         }
-        showToast("Explorar: Busca usuarios o temas");
     }
 
     // Expose functions globally for HTML onclick access
