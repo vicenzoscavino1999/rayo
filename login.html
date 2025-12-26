@@ -365,10 +365,7 @@
                     Continuar con Google
                 </button>
 
-                <button type="button" class="btn-demo" id="demo-btn">
-                    <i data-lucide="play-circle" style="width: 20px; height: 20px;"></i>
-                    Entrar en Modo Demo
-                </button>
+
             </form>
 
             <!-- Register Form -->
@@ -420,19 +417,7 @@
             });
         });
 
-        // Demo mode - goes directly to main app
-        document.getElementById('demo-btn').addEventListener('click', () => {
-            // Store demo mode flag
-            localStorage.setItem('rayo_demo_mode', 'true');
-            localStorage.setItem('rayo_demo_user', JSON.stringify({
-                uid: 'demo-user-123',
-                displayName: 'Usuario Demo',
-                username: 'demo_user',
-                photoURL: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix',
-                email: 'demo@rayo.app'
-            }));
-            window.location.href = 'index.html';
-        });
+
 
         // Google sign-in
         document.getElementById('google-btn').addEventListener('click', async () => {
@@ -444,7 +429,7 @@
 
             try {
                 // Import Firebase functions dynamically
-                const { loginWithGoogle } = await import('./firebase-config.js');
+                const { loginWithGoogle, loginUser, registerUser } = await import('./firebase-config.js');
                 const result = await loginWithGoogle();
 
                 if (result.success) {
@@ -477,35 +462,51 @@
         });
 
         // Login form submission
+        // Login form submission
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const btn = document.getElementById('login-btn');
             const message = document.getElementById('login-message');
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
 
             btn.disabled = true;
             btn.innerHTML = '<span class="loading-spinner"></span>';
 
-            // Simulated login for demo (replace with Firebase when configured)
-            setTimeout(() => {
-                message.className = 'message success';
-                message.textContent = '¡Bienvenido! Redirigiendo...';
+            try {
+                const { loginUser } = await import('./firebase-config.js');
+                const result = await loginUser(email, password);
 
-                // Demo: save user and redirect
-                localStorage.setItem('rayo_demo_mode', 'true');
-                localStorage.setItem('rayo_demo_user', JSON.stringify({
-                    uid: 'user-' + Date.now(),
-                    displayName: 'Usuario',
-                    username: 'usuario',
-                    photoURL: 'https://api.dicebear.com/7.x/avataaars/svg?seed=User',
-                    email: document.getElementById('login-email').value
-                }));
+                if (result.success) {
+                    message.className = 'message success';
+                    message.textContent = '¡Bienvenido! Redirigiendo...';
 
-                setTimeout(() => {
-                    window.location.href = 'index.html';
-                }, 1000);
-            }, 1500);
+                    // Save user to localStorage (for compatibility with current app.js)
+                    localStorage.setItem('rayo_firebase_user', 'true');
+                    localStorage.setItem('rayo_demo_mode', 'true');
+                    localStorage.setItem('rayo_demo_user', JSON.stringify({
+                        uid: result.user.uid,
+                        displayName: result.user.displayName || email.split('@')[0],
+                        username: result.user.email ? result.user.email.split('@')[0] : 'user',
+                        photoURL: result.user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${result.user.uid}`,
+                        email: result.user.email
+                    }));
+
+                    setTimeout(() => {
+                        window.location.href = 'index.html';
+                    }, 1000);
+                } else {
+                    throw new Error(result.error);
+                }
+            } catch (error) {
+                message.className = 'message error';
+                message.textContent = 'Error: ' + error.message;
+                btn.disabled = false;
+                btn.textContent = 'Iniciar Sesión';
+            }
         });
 
+        // Register form submission
         // Register form submission
         document.getElementById('register-form').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -514,6 +515,7 @@
             const username = document.getElementById('register-username').value;
             const name = document.getElementById('register-name').value;
             const email = document.getElementById('register-email').value;
+            const password = document.getElementById('register-password').value;
 
             // Validate username
             if (!/^[a-zA-Z0-9_]+$/.test(username)) {
@@ -525,24 +527,37 @@
             btn.disabled = true;
             btn.innerHTML = '<span class="loading-spinner"></span>';
 
-            // Simulated registration for demo
-            setTimeout(() => {
-                message.className = 'message success';
-                message.textContent = '¡Cuenta creada! Redirigiendo...';
+            try {
+                const { registerUser } = await import('./firebase-config.js');
+                const result = await registerUser(email, password, name, username);
 
-                localStorage.setItem('rayo_demo_mode', 'true');
-                localStorage.setItem('rayo_demo_user', JSON.stringify({
-                    uid: 'user-' + Date.now(),
-                    displayName: name,
-                    username: username,
-                    photoURL: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`,
-                    email: email
-                }));
+                if (result.success) {
+                    message.className = 'message success';
+                    message.textContent = '¡Cuenta creada! Redirigiendo...';
 
-                setTimeout(() => {
-                    window.location.href = 'index.html';
-                }, 1000);
-            }, 1500);
+                    // Save user to localStorage
+                    localStorage.setItem('rayo_firebase_user', 'true');
+                    localStorage.setItem('rayo_demo_mode', 'true');
+                    localStorage.setItem('rayo_demo_user', JSON.stringify({
+                        uid: result.user.uid,
+                        displayName: name,
+                        username: username,
+                        photoURL: result.user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`,
+                        email: email
+                    }));
+
+                    setTimeout(() => {
+                        window.location.href = 'index.html';
+                    }, 1000);
+                } else {
+                    throw new Error(result.error);
+                }
+            } catch (error) {
+                message.className = 'message error';
+                message.textContent = 'Error: ' + error.message;
+                btn.disabled = false;
+                btn.textContent = 'Crear Cuenta';
+            }
         });
     </script>
 </body>
