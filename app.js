@@ -608,35 +608,49 @@ document.addEventListener('DOMContentLoaded', async () => {
         selectedPostId = null;
     }
 
-    function addComment(content) {
+    async function addComment(content) {
         if (!selectedPostId || !content.trim()) return;
 
-        const posts = getPosts();
-        const post = posts.find(p => p.id === selectedPostId);
-        if (!post) return;
+        // Use Firestore if in Firebase mode
+        if (firestoreReady) {
+            const comment = await addFirestoreComment(selectedPostId, content.trim());
+            if (comment) {
+                // Refresh the comment modal to show the new comment
+                // The real-time subscription will update posts, but we need to refresh the modal
+                setTimeout(() => {
+                    openCommentModal(selectedPostId);
+                }, 500);
+            }
+        } else {
+            // localStorage fallback
+            const posts = getPosts();
+            const post = posts.find(p => p.id === selectedPostId);
+            if (!post) return;
 
-        if (!Array.isArray(post.comments)) {
-            post.comments = [];
+            if (!Array.isArray(post.comments)) {
+                post.comments = [];
+            }
+
+            const newComment = {
+                id: 'comment-' + Date.now(),
+                authorId: currentUser.uid,
+                authorName: currentUser.displayName,
+                authorUsername: currentUser.username,
+                authorPhoto: currentUser.photoURL,
+                content: content.trim(),
+                createdAt: Date.now()
+            };
+
+            post.comments.push(newComment);
+            savePosts(posts);
+
+            if (post.authorId !== currentUser.uid) {
+                addNotification('comment', currentUser, selectedPostId);
+            }
+
+            openCommentModal(selectedPostId);
         }
 
-        const newComment = {
-            id: 'comment-' + Date.now(),
-            authorId: currentUser.uid,
-            authorName: currentUser.displayName,
-            authorUsername: currentUser.username,
-            authorPhoto: currentUser.photoURL,
-            content: content.trim(),
-            createdAt: Date.now()
-        };
-
-        post.comments.push(newComment);
-        savePosts(posts);
-
-        if (post.authorId !== currentUser.uid) {
-            addNotification('comment', currentUser, selectedPostId);
-        }
-
-        openCommentModal(selectedPostId);
         document.getElementById('comment-textarea').value = '';
         document.getElementById('comment-post-btn').disabled = true;
     }
