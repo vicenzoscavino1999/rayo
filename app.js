@@ -5,18 +5,47 @@
 const isFirebaseMode = localStorage.getItem('rayo_firebase_user') === 'true';
 let firestoreService = null;
 let unsubscribePosts = null;
+let firestoreReady = false;
 
-// Load Firestore service if in Firebase mode
-if (isFirebaseMode) {
-    import('./firestore-service.js').then(module => {
-        firestoreService = module;
-        console.log('🔥 Firestore mode enabled');
-    }).catch(err => {
+// Firebase imports for Firestore mode
+let db, collection, addDoc, getDocs, query, orderBy, limit, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, where, getDoc, setDoc, arrayUnion, arrayRemove;
+
+// Load Firestore if in Firebase mode
+async function initFirestore() {
+    if (!isFirebaseMode) return false;
+
+    try {
+        const firebaseConfig = await import('./firebase-config.js');
+        db = firebaseConfig.db;
+
+        const firestore = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js");
+        collection = firestore.collection;
+        addDoc = firestore.addDoc;
+        getDocs = firestore.getDocs;
+        query = firestore.query;
+        orderBy = firestore.orderBy;
+        limit = firestore.limit;
+        onSnapshot = firestore.onSnapshot;
+        doc = firestore.doc;
+        updateDoc = firestore.updateDoc;
+        deleteDoc = firestore.deleteDoc;
+        serverTimestamp = firestore.serverTimestamp;
+        where = firestore.where;
+        getDoc = firestore.getDoc;
+        setDoc = firestore.setDoc;
+        arrayUnion = firestore.arrayUnion;
+        arrayRemove = firestore.arrayRemove;
+
+        firestoreReady = true;
+        console.log('🔥 Firestore mode enabled - Posts will sync in real-time');
+        return true;
+    } catch (err) {
         console.warn('Firestore not available, using localStorage:', err.message);
-    });
+        return false;
+    }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     // ==================== CHECK AUTH ====================
     const demoMode = localStorage.getItem('rayo_demo_mode');
     const demoUser = JSON.parse(localStorage.getItem('rayo_demo_user') || 'null');
@@ -40,18 +69,148 @@ document.addEventListener('DOMContentLoaded', () => {
 
     updateUserUI(currentUser);
 
+    // Initialize Firestore if in Firebase mode
+    const firestoreLoaded = await initFirestore();
+
     // Use Firestore or localStorage depending on mode
-    if (isFirebaseMode && firestoreService) {
+    if (firestoreLoaded) {
         // Subscribe to real-time posts from Firestore
-        unsubscribePosts = firestoreService.subscribeToPostsFirestore((posts) => {
-            renderPosts(posts);
-        });
+        subscribeToFirestorePosts();
     } else {
         loadPosts();
     }
 
     updateNotificationBadge();
     lucide.createIcons();
+
+    // ==================== FIRESTORE POSTS ====================
+    function subscribeToFirestorePosts() {
+        const q = query(
+            collection(db, "posts"),
+            orderBy("createdAt", "desc"),
+            limit(50)
+        );
+
+        unsubscribePosts = onSnapshot(q, (snapshot) => {
+            const posts = [];
+            snapshot.forEach(docSnap => {
+                const data = docSnap.data();
+                posts.push({
+                    id: docSnap.id,
+                    ...data,
+                    createdAt: data.createdAt?.toMillis ? data.createdAt.toMillis() : Date.now()
+                });
+            });
+            renderPosts(posts);
+        }, (error) => {
+            console.error('Error subscribing to posts:', error);
+            loadPosts(); // Fallback to localStorage
+        });
+    }
+
+    async function createFirestorePost(content, imageUrl = null) {
+        if (!firestoreReady) {
+            createLocalPost(content, imageUrl);
+            return;
+        }
+
+        try {
+            const postData = {
+                authorId: currentUser.uid,
+                authorName: currentUser.displayName,
+                authorUsername: currentUser.username,
+                authorPhoto: currentUser.photoURL,
+                verified: false,
+                content: content,
+                imageUrl: imageUrl,
+                likes: [],
+                reposts: [],
+                comments: [],
+                views: Math.floor(Math.random() * 100) + 10,
+                createdAt: serverTimestamp()
+            };
+
+            await addDoc(collection(db, "posts"), postData);
+            showToast('¡Publicación creada!');
+            // Real-time subscription will automatically update the UI
+        } catch (error) {
+            console.error('Error creating post:', error);
+            showToast('Error al publicar. Intenta de nuevo.');
+        }
+    }
+
+    async function toggleFirestoreLike(postId) {
+        if (!firestoreReady) return toggleLocalLike(postId);
+
+        try {
+            const postRef = doc(db, "posts", postId);
+            const postSnap = await getDoc(postRef);
+
+            if (!postSnap.exists()) return false;
+
+            const postData = postSnap.data();
+            const likes = postData.likes || [];
+            const isLiked = likes.includes(currentUser.uid);
+
+            if (isLiked) {
+                await updateDoc(postRef, { likes: arrayRemove(currentUser.uid) });
+            } else {
+                await updateDoc(postRef, { likes: arrayUnion(currentUser.uid) });
+            }
+
+            return !isLiked;
+        } catch (error) {
+            console.error('Error toggling like:', error);
+            return false;
+        }
+    }
+
+    async function deleteFirestorePost(postId) {
+        if (!firestoreReady) return deleteLocalPost(postId);
+
+        try {
+            const postRef = doc(db, "posts", postId);
+            const postSnap = await getDoc(postRef);
+
+            if (postSnap.exists() && postSnap.data().authorId === currentUser.uid) {
+                await deleteDoc(postRef);
+                showToast('Publicación eliminada');
+                return true;
+            }
+            return false;
+        } catch (error) {
+            console.error('Error deleting post:', error);
+            return false;
+        }
+    }
+
+    async function addFirestoreComment(postId, content) {
+        if (!firestoreReady) return addLocalComment(postId, content);
+
+        try {
+            const postRef = doc(db, "posts", postId);
+
+            const comment = {
+                id: 'comment-' + Date.now(),
+                authorId: currentUser.uid,
+                authorName: currentUser.displayName,
+                authorUsername: currentUser.username,
+                authorPhoto: currentUser.photoURL,
+                content: content,
+                createdAt: Date.now()
+            };
+
+            await updateDoc(postRef, {
+                comments: arrayUnion(comment)
+            });
+
+            return comment;
+        } catch (error) {
+            console.error('Error adding comment:', error);
+            return null;
+        }
+    }
+
 
     // ==================== USER UI ====================
     function updateUserUI(user) {
@@ -762,7 +921,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     btnPost.addEventListener('click', () => {
-        createNewPost(textarea.value.trim(), pendingImageData);
+        // Use Firestore if in Firebase mode, otherwise localStorage
+        if (firestoreReady) {
+            createFirestorePost(textarea.value.trim(), pendingImageData);
+        } else {
+            createNewPost(textarea.value.trim(), pendingImageData);
+        }
         textarea.value = '';
         textarea.style.height = 'auto';
         btnPost.disabled = true;
@@ -838,7 +1002,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     modalPostBtn.addEventListener('click', () => {
-        createNewPost(modalTextarea.value.trim(), pendingImageData);
+        // Use Firestore if in Firebase mode, otherwise localStorage
+        if (firestoreReady) {
+            createFirestorePost(modalTextarea.value.trim(), pendingImageData);
+        } else {
+            createNewPost(modalTextarea.value.trim(), pendingImageData);
+        }
         closeModal();
     });
 
@@ -911,7 +1080,22 @@ document.addEventListener('DOMContentLoaded', () => {
         if (heartAction) {
             e.preventDefault();
             e.stopPropagation();
-            toggleLike(heartAction.dataset.postId);
+            const postId = heartAction.dataset.postId;
+
+            // Use Firestore if in Firebase mode
+            if (firestoreReady) {
+                toggleFirestoreLike(postId).then(isNowLiked => {
+                    // Update UI immediately for responsiveness
+                    heartAction.classList.toggle('liked', isNowLiked);
+                    const countSpan = heartAction.querySelector('span');
+                    if (countSpan) {
+                        const currentCount = parseInt(countSpan.textContent) || 0;
+                        countSpan.textContent = isNowLiked ? currentCount + 1 : Math.max(0, currentCount - 1);
+                    }
+                });
+            } else {
+                toggleLike(postId);
+            }
             return;
         }
 
@@ -920,7 +1104,12 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             e.stopPropagation();
             if (confirm('¿Eliminar este post?')) {
-                deletePost(deleteBtn.dataset.postId);
+                const postId = deleteBtn.dataset.postId;
+                if (firestoreReady) {
+                    deleteFirestorePost(postId);
+                } else {
+                    deletePost(postId);
+                }
             }
             return;
         }
