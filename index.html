@@ -24,8 +24,9 @@
                 <nav class="nav-menu">
                     <a href="#" class="nav-item active"><i data-lucide="home"></i> <span
                             class="nav-text">Inicio</span></a>
-                    <a href="#" class="nav-item"><i data-lucide="search"></i> <span class="nav-text">Explorar</span></a>
-                    <a href="#" class="nav-item position-relative">
+                    <a href="#" class="nav-item" onclick="showExplore(); return false;"><i data-lucide="search"></i>
+                        <span class="nav-text">Explorar</span></a>
+                    <a href="#" class="nav-item position-relative" onclick="showNotifications(); return false;">
                         <i data-lucide="bell"></i>
                         <span class="nav-text">Notificaciones</span>
                         <span class="badge" id="notification-badge">3</span>

@@ -84,7 +84,34 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     updateNotificationBadge();
+    updateNotificationBadge();
     lucide.createIcons();
+
+    // Check URL params for initial navigation
+    const urlParams = new URLSearchParams(window.location.search);
+    const initialView = urlParams.get('view');
+
+    if (initialView === 'profile') {
+        setTimeout(() => {
+            showProfile(currentUser.uid);
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+            document.getElementById('nav-profile').classList.add('active');
+        }, 100);
+    } else if (initialView === 'notifications') {
+        setTimeout(() => {
+            showNotifications();
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+            // Select notifications item (3rd link)
+            document.querySelectorAll('.nav-item')[2]?.classList.add('active');
+        }, 100);
+    } else if (initialView === 'explore') {
+        setTimeout(() => {
+            showExplore();
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+            // Select explore item (2nd link)
+            document.querySelectorAll('.nav-item')[1]?.classList.add('active');
+        }, 100);
+    }
 
     // ==================== FIRESTORE POSTS ====================
     function subscribeToFirestorePosts() {
@@ -1094,4 +1121,42 @@ document.addEventListener('DOMContentLoaded', async () => {
             setTimeout(() => toast.remove(), 300);
         }, 2000);
     }
+    // Navigation Views
+    function showNotifications() {
+        // Create simple modal for notifications
+        const modalHtml = `
+            <div class="modal-overlay active" id="notifications-modal">
+                <div class="modal-container">
+                    <div class="modal-header">
+                        <h2>Notificaciones</h2>
+                        <button class="btn-icon" onclick="document.getElementById('notifications-modal').remove()"><i data-lucide="x"></i></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="empty-state">
+                            <div class="empty-icon"><i data-lucide="bell"></i></div>
+                            <h3>No tienes notificaciones</h3>
+                            <p>Cuando alguien interactúe contigo, aparecerá aquí.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        lucide.createIcons();
+    }
+
+    function showExplore() {
+        // Focus search bar and show toast
+        const searchInput = document.querySelector('.search-bar input');
+        if (searchInput) {
+            searchInput.focus();
+            searchInput.parentElement.classList.add('highlight-pulse');
+            setTimeout(() => searchInput.parentElement.classList.remove('highlight-pulse'), 2000);
+        }
+        showToast("Explorar: Busca usuarios o temas");
+    }
+
+    // Expose functions globally for HTML onclick access
+    window.showNotifications = showNotifications;
+    window.showExplore = showExplore;
 });
